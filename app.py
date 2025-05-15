@@ -8,7 +8,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from PIL import Image, ImageEnhance
 import torch
-from transformers import VisionEncoderDecoderModel, ViTImageProcessor, AutoTokenizer
+from transformers import BlipProcessor, BlipForConditionalGeneration
 import base64
 import io
 import json
@@ -137,14 +137,15 @@ def load_user(user_id):
 
 # Load image captioning model
 def load_captioning_model():
-    model = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
-    feature_extractor = ViTImageProcessor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
-    tokenizer = AutoTokenizer.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+    model_name = "Salesforce/blip-image-captioning-base"
+    processor = BlipProcessor.from_pretrained(model_name)
+    model = BlipForConditionalGeneration.from_pretrained(model_name)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     
-    return model, feature_extractor, tokenizer, device
+    return model, processor, device
+
 
 # Load image enhancement model
 def load_enhancement_model():
@@ -173,11 +174,11 @@ def load_enhancement_model():
 
 # Initialize models
 try:
-    caption_model, feature_extractor, tokenizer, device = load_captioning_model()
+    caption_model, feature_extractor, device = load_captioning_model()
     print("Captioning model loaded successfully")
 except Exception as e:
     print(f"Error loading captioning model: {e}")
-    caption_model, feature_extractor, tokenizer, device = None, None, None, None
+    caption_model, feature_extractor, device = None, None, None
 
 try:
     enhancement_sess, enhancement_graph = load_enhancement_model()
@@ -200,14 +201,13 @@ def generate_caption(image):
         elif isinstance(image, np.ndarray):  # If image is a numpy array
             image = Image.fromarray(image).convert('RGB')
         
-        pixel_values = feature_extractor(images=[image], return_tensors="pt").pixel_values.to(device)
+        inputs = feature_extractor(images=image, return_tensors="pt").to(device)
         
         # Generate caption
         with torch.no_grad():
-            output_ids = caption_model.generate(pixel_values, max_length=50, num_beams=4)
+            out = caption_model.generate(**inputs, max_length=50, num_beams=4)
         
-        # Decode the caption
-        caption = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0]
+        caption = feature_extractor.decode(out[0], skip_special_tokens=True)
         return caption
     
     except Exception as e:
